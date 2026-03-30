@@ -6,18 +6,20 @@ on:
     # EDT (UTC-4, Mar-Nov): 13:30 UTC
     # EST (UTC-5, Nov-Mar): 14:30 UTC
     - cron: '30 13 * * *'
-  workflow_dispatch: # Allow manual trigger for testing
+  workflow_dispatch:
 
 jobs:
   summarize:
     runs-on: ubuntu-latest
     permissions:
       issues: write
-      contents: read
+      contents: write  # Required to push docs/
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history so archive list is complete
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -27,11 +29,22 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Fetch papers and generate summary
+      - name: Fetch papers, generate summary and send email
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}  # Optional: higher PubMed rate limit
+          NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
         run: python scripts/fetch_papers.py
+
+      - name: Commit and push updated webpage
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git diff --staged --quiet || git commit -m "docs: daily summary $(date -u +%Y-%m-%d)"
+          git push
 
       - name: Create GitHub Issue with summary
         uses: actions/github-script@v7
@@ -41,29 +54,23 @@ jobs:
             const summary = fs.readFileSync('daily_summary.md', 'utf8');
             const dateStr = new Date().toISOString().split('T')[0];
 
-            // Create label if it doesn't exist
             try {
               await github.rest.issues.getLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
+                owner: context.repo.owner, repo: context.repo.repo,
                 name: 'daily-summary',
               });
             } catch (e) {
               await github.rest.issues.createLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                name: 'daily-summary',
-                color: '0075ca',
+                owner: context.repo.owner, repo: context.repo.repo,
+                name: 'daily-summary', color: '0075ca',
                 description: 'Automated daily literature summary',
               });
             }
 
             const issue = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner: context.repo.owner, repo: context.repo.repo,
               title: `\u{1F4DA} \u6587\u732e\u65E5\u62A5 | Daily Summary ${dateStr}`,
               body: summary,
               labels: ['daily-summary'],
             });
-
             console.log(`Issue #${issue.data.number} created: ${issue.data.html_url}`);
