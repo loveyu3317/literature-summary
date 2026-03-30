@@ -14,7 +14,8 @@ Automatic daily literature digest focused on:
 | medRxiv | Keyword-filtered |
 
 ## Schedule
-Runs automatically every day at **9:30 AM EDT** (New Haven time) via GitHub Actions.  
+Runs automatically every day at **9:30 AM ET** (Eastern Time) via GitHub Actions.
+
 Results are posted as GitHub Issues with the `daily-summary` label.
 
 ## Setup

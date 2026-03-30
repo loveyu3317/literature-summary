@@ -2,8 +2,9 @@ name: Daily Literature Summary
 
 on:
   schedule:
-    # 9:30 AM EDT (UTC-4) = 13:30 UTC
-    # Note: shifts to 8:30 AM EST (UTC-5) in winter (Nov-Mar)
+    # 9:30 AM ET (Eastern Time)
+    # EDT (UTC-4, Mar-Nov): 13:30 UTC
+    # EST (UTC-5, Nov-Mar): 14:30 UTC
     - cron: '30 13 * * *'
   workflow_dispatch: # Allow manual trigger for testing
 
