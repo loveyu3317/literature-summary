@@ -12,9 +12,12 @@ import re
 import time
 import requests
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from xml.etree import ElementTree
 from pathlib import Path
 import anthropic
+
+ET = ZoneInfo("America/New_York")  # Handles EDT/EST automatically
 
 # ── Journal List (IF > 10) ────────────────────────────────────────────────────
 HIGH_IF_JOURNALS = [
@@ -58,7 +61,7 @@ PREPRINT_KEYWORDS = [
 # ── PubMed ────────────────────────────────────────────────────────────────────
 def fetch_pubmed_papers():
     base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
-    today = datetime.utcnow()
+    today = datetime.now(ET)
     start = (today - timedelta(days=2)).strftime("%Y/%m/%d")
     end = today.strftime("%Y/%m/%d")
 
@@ -153,7 +156,7 @@ def parse_pubmed_xml(xml_text):
 
 # ── Preprints ─────────────────────────────────────────────────────────────────
 def fetch_preprints(server="biorxiv"):
-    today = datetime.utcnow()
+    today = datetime.now(ET)
     start = (today - timedelta(days=2)).strftime("%Y-%m-%d")
     end = today.strftime("%Y-%m-%d")
     url = f"https://api.biorxiv.org/details/{server}/{start}/{end}/0/json"
@@ -185,18 +188,15 @@ def fetch_preprints(server="biorxiv"):
 # ── JSON extraction helper ────────────────────────────────────────────────────
 def extract_json(text):
     """Robustly extract a JSON object from Claude's response."""
-    # 1. Strip markdown code fences
     text = re.sub(r"```(?:json)?\s*", "", text)
     text = re.sub(r"```", "", text)
     text = text.strip()
 
-    # 2. Try direct parse
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # 3. Find outermost { ... } and try again
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -208,7 +208,7 @@ def extract_json(text):
     return None
 
 
-# ── Claude Summarization (returns structured JSON) ────────────────────────────
+# ── Claude Summarization ──────────────────────────────────────────────────────
 def summarize_with_claude(papers, date_str):
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
@@ -315,7 +315,7 @@ def render_markdown(data, counts):
 
     lines += [
         "---", "", "## Daily Synthesis | 今日综述", "", synthesis, "", "---",
-        f"*Auto-generated | 自动生成 {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC*",
+        f"*Auto-generated | 自动生成 {datetime.now(ET).strftime('%Y-%m-%d %H:%M')} ET*",
     ]
     return "\n".join(lines)
 
@@ -325,6 +325,7 @@ def render_html(data, counts, archive_dates=None):
     papers = data.get("papers", [])
     synthesis = data.get("synthesis", "").replace("\n", "<br>")
     archive_dates = sorted(archive_dates or [], reverse=True)
+    now_et = datetime.now(ET).strftime("%Y-%m-%d %H:%M ET")
 
     def badge(source):
         cls = {"PubMed": "pubmed", "biorxiv": "biorxiv", "medrxiv": "medrxiv"}.get(source, "pubmed")
@@ -464,7 +465,7 @@ def render_html(data, counts, archive_dates=None):
 </div>
 
 <footer>
-  Auto-generated · 自动生成 {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC ·
+  Auto-generated · 自动生成 {now_et} ·
   <a href="https://github.com/loveyu3317/genomic-literature-summary">GitHub</a>
 </footer>
 </body>
@@ -473,8 +474,8 @@ def render_html(data, counts, archive_dates=None):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    date_str = datetime.utcnow().strftime("%Y-%m-%d")
-    print(f"=== Daily Literature Summary: {date_str} ===")
+    date_str = datetime.now(ET).strftime("%Y-%m-%d")
+    print(f"=== Daily Literature Summary: {date_str} ET ===")
 
     pubmed_papers = fetch_pubmed_papers()
     print(f"PubMed: {len(pubmed_papers)}")
