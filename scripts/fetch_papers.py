@@ -8,6 +8,7 @@ outputs GitHub Issue markdown and webpage HTML.
 
 import os
 import json
+import re
 import time
 import requests
 from datetime import datetime, timedelta
@@ -181,6 +182,32 @@ def fetch_preprints(server="biorxiv"):
     return papers[:20]
 
 
+# ── JSON extraction helper ────────────────────────────────────────────────────
+def extract_json(text):
+    """Robustly extract a JSON object from Claude's response."""
+    # 1. Strip markdown code fences
+    text = re.sub(r"```(?:json)?\s*", "", text)
+    text = re.sub(r"```", "", text)
+    text = text.strip()
+
+    # 2. Try direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 3. Find outermost { ... } and try again
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
 # ── Claude Summarization (returns structured JSON) ────────────────────────────
 def summarize_with_claude(papers, date_str):
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -203,7 +230,7 @@ def summarize_with_claude(papers, date_str):
 Research focus: suicide/self-harm genomics using UKB/All of Us data, GWAS, TWAS,
 single-cell RNA-seq, spatial transcriptomics, PRS, and ML/DL risk prediction.
 
-Evaluate {len(papers)} papers and return ONLY a valid JSON object (no markdown, no explanation):
+Evaluate {len(papers)} papers. Return ONLY a raw JSON object — no markdown fences, no explanation, no text before or after the JSON.
 
 {{
   "date": "{date_str}",
@@ -225,12 +252,12 @@ Evaluate {len(papers)} papers and return ONLY a valid JSON object (no markdown, 
 }}
 
 Rules:
-- Include only TOP 10 most relevant papers
-- relevance: integer 1-5 (5 = directly about suicide genomics with UKB/ML)
+- TOP 10 most relevant papers only
+- relevance: integer 1-5
 - synthesis: Chinese only, 4-6 sentences
-- Return ONLY valid JSON
+- Output MUST start with {{ and end with }}
 
-Papers to evaluate:
+Papers:
 {papers_text}"""
 
     message = client.messages.create(
@@ -239,18 +266,16 @@ Papers to evaluate:
         messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = message.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
+    raw = message.content[0].text
+    print(f"Claude raw output (first 200 chars): {raw[:200]}")
 
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"JSON parse error: {e}")
-        return {"date": date_str, "papers": [], "synthesis": raw}
+    data = extract_json(raw)
+    if data is None:
+        print("JSON extraction failed, using fallback.")
+        return {"date": date_str, "papers": [],
+                "synthesis": "JSON parsing error — please check Actions logs."}
+
+    return data
 
 
 # ── Renderers ─────────────────────────────────────────────────────────────────
@@ -370,8 +395,7 @@ def render_html(data, counts, archive_dates=None):
                       border-bottom: 2px solid #2b6cb0; padding-bottom: 7px;
                       margin: 24px 0 14px; text-transform: uppercase; letter-spacing: 0.06em; }}
     .paper-card {{ background: white; border: 1px solid #e2e8f0; border-radius: 10px;
-                   padding: 18px 22px; margin-bottom: 12px;
-                   transition: box-shadow 0.18s; }}
+                   padding: 18px 22px; margin-bottom: 12px; transition: box-shadow 0.18s; }}
     .paper-card:hover {{ box-shadow: 0 4px 14px rgba(0,0,0,0.08); }}
     .paper-title {{ font-size: 0.97rem; font-weight: 600; color: #1a365d; margin: 5px 0 3px; }}
     .paper-title a {{ color: inherit; text-decoration: none; }}
@@ -468,13 +492,11 @@ def main():
 
     data = summarize_with_claude(all_papers, date_str)
 
-    # Markdown for GitHub Issue
     markdown_output = render_markdown(data, counts)
     with open("daily_summary.md", "w", encoding="utf-8") as f:
         f.write(markdown_output)
     print("Saved daily_summary.md")
 
-    # HTML for webpage
     docs_dir = Path("docs")
     archives_dir = docs_dir / "archives"
     archives_dir.mkdir(parents=True, exist_ok=True)
