@@ -3,17 +3,14 @@
 Daily genomic literature summarizer.
 Fetches papers from PubMed (IF>10), bioRxiv, and medRxiv,
 uses Claude to generate structured bilingual summaries,
-outputs GitHub Issue markdown, webpage HTML, and email.
+outputs GitHub Issue markdown and webpage HTML.
 """
 
 import os
 import json
 import time
-import smtplib
 import requests
 from datetime import datetime, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from xml.etree import ElementTree
 from pathlib import Path
 import anthropic
@@ -266,8 +263,7 @@ def render_markdown(data, counts):
     lines = [
         "## 搜索范围 | Search Scope", "",
         "| 来源 Source | 数量 Count |",
-        "|-------------|------------|"]
-    lines += [
+        "|-------------|------------|",
         f"| PubMed (IF > 10) | {counts['pubmed']} |",
         f"| bioRxiv | {counts['biorxiv']} |",
         f"| medRxiv | {counts['medrxiv']} |",
@@ -451,32 +447,6 @@ def render_html(data, counts, archive_dates=None):
 </html>"""
 
 
-# ── Email ─────────────────────────────────────────────────────────────────────
-def send_email(subject, html_content, text_content):
-    sender = os.environ.get("GMAIL_USER", "")
-    password = os.environ.get("GMAIL_APP_PASSWORD", "")
-    recipient = os.environ.get("EMAIL_RECIPIENT", sender)
-
-    if not sender or not password:
-        print("Email skipped: GMAIL_USER or GMAIL_APP_PASSWORD not set.")
-        return
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = f"文献日报 <{sender}>"
-    msg["To"] = recipient
-    msg.attach(MIMEText(text_content, "plain", "utf-8"))
-    msg.attach(MIMEText(html_content, "html", "utf-8"))
-
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(sender, password)
-            server.sendmail(sender, recipient, msg.as_string())
-        print(f"Email sent to {recipient}")
-    except Exception as e:
-        print(f"Email error: {e}")
-
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     date_str = datetime.utcnow().strftime("%Y-%m-%d")
@@ -523,10 +493,6 @@ def main():
     with open(docs_dir / "index.html", "w", encoding="utf-8") as f:
         f.write(html_content)
     print("Updated docs/index.html")
-
-    # Send email
-    subject = f"\U0001f4da 文献日报 {date_str} | {len(data.get('papers', []))} 篇精选"
-    send_email(subject, html_content, markdown_output)
 
 
 if __name__ == "__main__":
