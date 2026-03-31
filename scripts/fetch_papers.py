@@ -187,7 +187,7 @@ def summarize_with_claude(papers, date_str):
 
     if not papers:
         return {"date": date_str, "papers": [],
-                "synthesis": "今日未发现相关新文献。\n\nNo relevant new papers found today."}
+                "synthesis": "No relevant new papers found today.\n\n今日未发现相关新文献。"}
 
     papers_text = "\n\n".join(
         f"[{i}] {p['title']}\n"
@@ -216,8 +216,8 @@ Evaluate {len(papers)} papers and return ONLY a valid JSON object (no markdown, 
       "journal": "journal name",
       "authors": "Author et al.",
       "url": "https://...",
+      "en_findings": "1-2 sentences in English summarizing key findings",
       "cn_findings": "2-3句中文核心发现",
-      "en_findings": "1-2 sentences in English",
       "relevance": 5
     }}
   ],
@@ -261,36 +261,36 @@ def render_markdown(data, counts):
     STARS = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐", 4: "⭐⭐⭐⭐", 5: "⭐⭐⭐⭐⭐"}
 
     lines = [
-        "## 搜索范围 | Search Scope", "",
-        "| 来源 Source | 数量 Count |",
+        "## Search Scope | 搜索范围", "",
+        "| Source 来源 | Count 数量 |",
         "|-------------|------------|",
         f"| PubMed (IF > 10) | {counts['pubmed']} |",
         f"| bioRxiv | {counts['biorxiv']} |",
         f"| medRxiv | {counts['medrxiv']} |",
-        f"| **合计 Total** | **{counts['total']}** |", "",
-        "> **搜索主题**: UKB/All of Us | 自杀/自伤基因组学 | GWAS/TWAS/单细胞/空间组学/PRS | 机器学习风险预测",
+        f"| **Total 合计** | **{counts['total']}** |", "",
+        "> **Topics**: UKB/All of Us | Suicide/Self-harm Genomics | GWAS/TWAS/Single-cell/Spatial/PRS | ML Risk Prediction",
         "", "---", "",
     ]
 
     if not papers:
-        lines.append("**今日未发现相关新文献。** No relevant papers found today.")
+        lines.append("**No relevant papers found today. 今日未发现相关新文献。**")
     else:
-        lines.append(f"## 精选文献 | Selected Papers ({len(papers)} 篇)\n")
+        lines.append(f"## Selected Papers | 精选文献 ({len(papers)})\n")
         for p in papers:
             lines += [
                 f"### {p['rank']}. {p['title']}",
                 f"**中文标题**: {p['cn_title']}",
-                f"**来源**: {p['source']} | **期刊**: {p['journal']} | **作者**: {p['authors']}",
-                f"**链接**: {p['url']}",
-                f"**核心发现**: {p['cn_findings']}",
+                f"**Source**: {p['source']} | **Journal**: {p['journal']} | **Authors**: {p['authors']}",
+                f"**URL**: {p['url']}",
                 f"**Key findings**: {p['en_findings']}",
-                f"**相关性**: {STARS.get(p.get('relevance', 3), '⭐⭐⭐')}",
+                f"**核心发现**: {p['cn_findings']}",
+                f"**Relevance**: {STARS.get(p.get('relevance', 3), '⭐⭐⭐')}",
                 "",
             ]
 
     lines += [
-        "---", "", "## 今日综述 | Daily Synthesis", "", synthesis, "", "---",
-        f"*自动生成 | Auto-generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC*",
+        "---", "", "## Daily Synthesis | 今日综述", "", synthesis, "", "---",
+        f"*Auto-generated | 自动生成 {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC*",
     ]
     return "\n".join(lines)
 
@@ -310,7 +310,7 @@ def render_html(data, counts, archive_dates=None):
 
     cards = ""
     if not papers:
-        cards = '<p class="no-results">今日未发现相关新文献。No relevant papers found today.</p>'
+        cards = '<p class="no-results">No relevant papers found today. 今日未发现相关新文献。</p>'
     else:
         for p in papers:
             cards += f"""
@@ -324,8 +324,8 @@ def render_html(data, counts, archive_dates=None):
           </h3>
           <div class="paper-cn-title">{p['cn_title']}</div>
           <div class="paper-findings">
-            <strong>核心发现：</strong>{p['cn_findings']}<br>
-            <strong>Key findings:</strong> {p['en_findings']}
+            <strong>Key findings:</strong> {p['en_findings']}<br>
+            <strong>核心发现：</strong>{p['cn_findings']}
           </div>
         </article>"""
 
@@ -338,7 +338,7 @@ def render_html(data, counts, archive_dates=None):
         )
         archive_nav = f"""
       <nav class="archive-nav">
-        <div class="archive-nav-title">历史存档 | Archive</div>
+        <div class="archive-nav-title">Archive | 历史存档</div>
         <div class="archive-links">{links}</div>
       </nav>"""
 
@@ -347,7 +347,7 @@ def render_html(data, counts, archive_dates=None):
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>基因组文献日报 | {date_str}</title>
+  <title>Genomic Literature Daily | {date_str}</title>
   <style>
     *, *::before, *::after {{ box-sizing: border-box; }}
     body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
@@ -413,8 +413,8 @@ def render_html(data, counts, archive_dates=None):
 </head>
 <body>
 <header class="header">
-  <h1>📚 基因组文献日报 | Genomic Literature Daily</h1>
-  <div class="subtitle">UKB · 自杀基因组学 · GWAS / TWAS / 单细胞 / 空间组学 · 机器学习风险预测</div>
+  <h1>📚 Genomic Literature Daily | 基因组文献日报</h1>
+  <div class="subtitle">UKB · Suicide Genomics · GWAS / TWAS / Single-cell / Spatial · ML Risk Prediction</div>
   <div class="date-badge">{date_str}</div>
 </header>
 
@@ -429,18 +429,18 @@ def render_html(data, counts, archive_dates=None):
     <div class="stat"><div class="stat-number">{counts['medrxiv']}</div>
       <div class="stat-label">medRxiv</div></div>
     <div class="stat"><div class="stat-number">{len(papers)}</div>
-      <div class="stat-label">精选 Selected</div></div>
+      <div class="stat-label">Selected 精选</div></div>
   </div>
 
-  <div class="section-title">精选文献 | Selected Papers</div>
+  <div class="section-title">Selected Papers | 精选文献</div>
   {cards}
 
-  <div class="section-title">今日综述 | Daily Synthesis</div>
+  <div class="section-title">Daily Synthesis | 今日综述</div>
   <div class="synthesis-box">{synthesis}</div>
 </div>
 
 <footer>
-  自动生成 · Auto-generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC ·
+  Auto-generated · 自动生成 {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC ·
   <a href="https://github.com/loveyu3317/genomic-literature-summary">GitHub</a>
 </footer>
 </body>
