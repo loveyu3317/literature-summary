@@ -252,7 +252,7 @@ Evaluate {len(papers)} papers. Return ONLY a raw JSON object — no markdown fen
 }}
 
 Rules:
-- TOP 10 most relevant papers only
+- MAXIMUM 10 papers — select only the most relevant; return fewer if less than 10 are truly relevant
 - relevance: integer 1-5
 - synthesis: Chinese only, 4-6 sentences
 - Output MUST start with {{ and end with }}
@@ -274,6 +274,10 @@ Papers:
         print("JSON extraction failed, using fallback.")
         return {"date": date_str, "papers": [],
                 "synthesis": "JSON parsing error — please check Actions logs."}
+
+    # Hard cap: keep only top 10 papers
+    if "papers" in data:
+        data["papers"] = data["papers"][:10]
 
     return data
 
