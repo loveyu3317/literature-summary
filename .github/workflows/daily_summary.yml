@@ -2,10 +2,10 @@ name: Daily Literature Summary
 
 on:
   schedule:
-    # 9:30 AM ET (Eastern Time)
-    # EDT (UTC-4, Mar-Nov): 13:30 UTC
-    # EST (UTC-5, Nov-Mar): 14:30 UTC
-    - cron: '30 13 * * *'
+    # 9:00 AM ET (Eastern Time)
+    # EDT (UTC-4, Mar-Nov): 13:00 UTC
+    # EST (UTC-5, Nov-Mar): runs at 8:00 AM ET — acceptable offset
+    - cron: '0 13 * * *'
   workflow_dispatch:
 
 jobs:
