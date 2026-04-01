@@ -8,12 +8,16 @@ outputs GitHub Issue markdown and webpage HTML.
 
 import os
 import json
+import re
 import time
 import requests
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from xml.etree import ElementTree
 from pathlib import Path
 import anthropic
+
+ET = ZoneInfo("America/New_York")  # Handles EDT/EST automatically
 
 # ── Journal List (IF > 10) ────────────────────────────────────────────────────
 HIGH_IF_JOURNALS = [
@@ -57,7 +61,7 @@ PREPRINT_KEYWORDS = [
 # ── PubMed ────────────────────────────────────────────────────────────────────
 def fetch_pubmed_papers():
     base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
-    today = datetime.utcnow()
+    today = datetime.now(ET)
     start = (today - timedelta(days=2)).strftime("%Y/%m/%d")
     end = today.strftime("%Y/%m/%d")
 
@@ -140,7 +144,7 @@ def parse_pubmed_xml(xml_text):
 
             papers.append({
                 "title": title,
-                "abstract": abstract[:600] if abstract else "No abstract available.",
+                "abstract": abstract[:300] if abstract else "No abstract available.",
                 "journal": journal, "pmid": pmid, "authors": author_str,
                 "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
                 "source": "PubMed", "doi": doi,
@@ -152,7 +156,7 @@ def parse_pubmed_xml(xml_text):
 
 # ── Preprints ─────────────────────────────────────────────────────────────────
 def fetch_preprints(server="biorxiv"):
-    today = datetime.utcnow()
+    today = datetime.now(ET)
     start = (today - timedelta(days=2)).strftime("%Y-%m-%d")
     end = today.strftime("%Y-%m-%d")
     url = f"https://api.biorxiv.org/details/{server}/{start}/{end}/0/json"
@@ -172,7 +176,7 @@ def fetch_preprints(server="biorxiv"):
             doi = item.get("doi", "")
             papers.append({
                 "title": item.get("title", "N/A"),
-                "abstract": item.get("abstract", "")[:600],
+                "abstract": item.get("abstract", "")[:300],
                 "journal": server.capitalize(),
                 "authors": item.get("authors", "N/A"),
                 "url": f"https://doi.org/{doi}" if doi else "N/A",
@@ -181,13 +185,36 @@ def fetch_preprints(server="biorxiv"):
     return papers[:20]
 
 
-# ── Claude Summarization (returns structured JSON) ────────────────────────────
+# ── JSON extraction helper ────────────────────────────────────────────────────
+def extract_json(text):
+    """Robustly extract a JSON object from Claude's response."""
+    text = re.sub(r"```(?:json)?\s*", "", text)
+    text = re.sub(r"```", "", text)
+    text = text.strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+# ── Claude Summarization ──────────────────────────────────────────────────────
 def summarize_with_claude(papers, date_str):
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     if not papers:
         return {"date": date_str, "papers": [],
-                "synthesis": "今日未发现相关新文献。\n\nNo relevant new papers found today."}
+                "synthesis": "No relevant new papers found today.\n\n今日未发现相关新文献。"}
 
     papers_text = "\n\n".join(
         f"[{i}] {p['title']}\n"
@@ -203,7 +230,7 @@ def summarize_with_claude(papers, date_str):
 Research focus: suicide/self-harm genomics using UKB/All of Us data, GWAS, TWAS,
 single-cell RNA-seq, spatial transcriptomics, PRS, and ML/DL risk prediction.
 
-Evaluate {len(papers)} papers and return ONLY a valid JSON object (no markdown, no explanation):
+Evaluate {len(papers)} papers. Return ONLY a raw JSON object — no markdown fences, no explanation, no text before or after the JSON.
 
 {{
   "date": "{date_str}",
@@ -216,8 +243,8 @@ Evaluate {len(papers)} papers and return ONLY a valid JSON object (no markdown, 
       "journal": "journal name",
       "authors": "Author et al.",
       "url": "https://...",
+      "en_findings": "1-2 sentences in English summarizing key findings",
       "cn_findings": "2-3句中文核心发现",
-      "en_findings": "1-2 sentences in English",
       "relevance": 5
     }}
   ],
@@ -225,32 +252,34 @@ Evaluate {len(papers)} papers and return ONLY a valid JSON object (no markdown, 
 }}
 
 Rules:
-- Include only TOP 10 most relevant papers
-- relevance: integer 1-5 (5 = directly about suicide genomics with UKB/ML)
+- MAXIMUM 10 papers — select only the most relevant; return fewer if less than 10 are truly relevant
+- relevance: integer 1-5
 - synthesis: Chinese only, 4-6 sentences
-- Return ONLY valid JSON
+- Output MUST start with {{ and end with }}
 
-Papers to evaluate:
+Papers:
 {papers_text}"""
 
     message = client.messages.create(
         model="claude-opus-4-6",
-        max_tokens=4000,
+        max_tokens=8000,
         messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = message.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
+    raw = message.content[0].text
+    print(f"Claude raw output (first 200 chars): {raw[:200]}")
 
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"JSON parse error: {e}")
-        return {"date": date_str, "papers": [], "synthesis": raw}
+    data = extract_json(raw)
+    if data is None:
+        print("JSON extraction failed, using fallback.")
+        return {"date": date_str, "papers": [],
+                "synthesis": "JSON parsing error — please check Actions logs."}
+
+    # Hard cap: keep only top 10 papers
+    if "papers" in data:
+        data["papers"] = data["papers"][:10]
+
+    return data
 
 
 # ── Renderers ─────────────────────────────────────────────────────────────────
@@ -261,36 +290,36 @@ def render_markdown(data, counts):
     STARS = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐", 4: "⭐⭐⭐⭐", 5: "⭐⭐⭐⭐⭐"}
 
     lines = [
-        "## 搜索范围 | Search Scope", "",
-        "| 来源 Source | 数量 Count |",
+        "## Search Scope | 搜索范围", "",
+        "| Source 来源 | Count 数量 |",
         "|-------------|------------|",
         f"| PubMed (IF > 10) | {counts['pubmed']} |",
         f"| bioRxiv | {counts['biorxiv']} |",
         f"| medRxiv | {counts['medrxiv']} |",
-        f"| **合计 Total** | **{counts['total']}** |", "",
-        "> **搜索主题**: UKB/All of Us | 自杀/自伤基因组学 | GWAS/TWAS/单细胞/空间组学/PRS | 机器学习风险预测",
+        f"| **Total 合计** | **{counts['total']}** |", "",
+        "> **Topics**: UKB/All of Us | Suicide/Self-harm Genomics | GWAS/TWAS/Single-cell/Spatial/PRS | ML Risk Prediction",
         "", "---", "",
     ]
 
     if not papers:
-        lines.append("**今日未发现相关新文献。** No relevant papers found today.")
+        lines.append("**No relevant papers found today. 今日未发现相关新文献。**")
     else:
-        lines.append(f"## 精选文献 | Selected Papers ({len(papers)} 篇)\n")
+        lines.append(f"## Selected Papers | 精选文献 ({len(papers)})\n")
         for p in papers:
             lines += [
                 f"### {p['rank']}. {p['title']}",
                 f"**中文标题**: {p['cn_title']}",
-                f"**来源**: {p['source']} | **期刊**: {p['journal']} | **作者**: {p['authors']}",
-                f"**链接**: {p['url']}",
-                f"**核心发现**: {p['cn_findings']}",
+                f"**Source**: {p['source']} | **Journal**: {p['journal']} | **Authors**: {p['authors']}",
+                f"**URL**: {p['url']}",
                 f"**Key findings**: {p['en_findings']}",
-                f"**相关性**: {STARS.get(p.get('relevance', 3), '⭐⭐⭐')}",
+                f"**核心发现**: {p['cn_findings']}",
+                f"**Relevance**: {STARS.get(p.get('relevance', 3), '⭐⭐⭐')}",
                 "",
             ]
 
     lines += [
-        "---", "", "## 今日综述 | Daily Synthesis", "", synthesis, "", "---",
-        f"*自动生成 | Auto-generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC*",
+        "---", "", "## Daily Synthesis | 今日综述", "", synthesis, "", "---",
+        f"*Auto-generated | 自动生成 {datetime.now(ET).strftime('%Y-%m-%d %H:%M')} ET*",
     ]
     return "\n".join(lines)
 
@@ -300,6 +329,7 @@ def render_html(data, counts, archive_dates=None):
     papers = data.get("papers", [])
     synthesis = data.get("synthesis", "").replace("\n", "<br>")
     archive_dates = sorted(archive_dates or [], reverse=True)
+    now_et = datetime.now(ET).strftime("%Y-%m-%d %H:%M ET")
 
     def badge(source):
         cls = {"PubMed": "pubmed", "biorxiv": "biorxiv", "medrxiv": "medrxiv"}.get(source, "pubmed")
@@ -310,7 +340,7 @@ def render_html(data, counts, archive_dates=None):
 
     cards = ""
     if not papers:
-        cards = '<p class="no-results">今日未发现相关新文献。No relevant papers found today.</p>'
+        cards = '<p class="no-results">No relevant papers found today. 今日未发现相关新文献。</p>'
     else:
         for p in papers:
             cards += f"""
@@ -324,8 +354,8 @@ def render_html(data, counts, archive_dates=None):
           </h3>
           <div class="paper-cn-title">{p['cn_title']}</div>
           <div class="paper-findings">
-            <strong>核心发现：</strong>{p['cn_findings']}<br>
-            <strong>Key findings:</strong> {p['en_findings']}
+            <strong>Key findings:</strong> {p['en_findings']}<br>
+            <strong>核心发现：</strong>{p['cn_findings']}
           </div>
         </article>"""
 
@@ -338,7 +368,7 @@ def render_html(data, counts, archive_dates=None):
         )
         archive_nav = f"""
       <nav class="archive-nav">
-        <div class="archive-nav-title">历史存档 | Archive</div>
+        <div class="archive-nav-title">Archive | 历史存档</div>
         <div class="archive-links">{links}</div>
       </nav>"""
 
@@ -347,7 +377,7 @@ def render_html(data, counts, archive_dates=None):
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>基因组文献日报 | {date_str}</title>
+  <title>Genomic Literature Daily | {date_str}</title>
   <style>
     *, *::before, *::after {{ box-sizing: border-box; }}
     body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
@@ -370,8 +400,7 @@ def render_html(data, counts, archive_dates=None):
                       border-bottom: 2px solid #2b6cb0; padding-bottom: 7px;
                       margin: 24px 0 14px; text-transform: uppercase; letter-spacing: 0.06em; }}
     .paper-card {{ background: white; border: 1px solid #e2e8f0; border-radius: 10px;
-                   padding: 18px 22px; margin-bottom: 12px;
-                   transition: box-shadow 0.18s; }}
+                   padding: 18px 22px; margin-bottom: 12px; transition: box-shadow 0.18s; }}
     .paper-card:hover {{ box-shadow: 0 4px 14px rgba(0,0,0,0.08); }}
     .paper-title {{ font-size: 0.97rem; font-weight: 600; color: #1a365d; margin: 5px 0 3px; }}
     .paper-title a {{ color: inherit; text-decoration: none; }}
@@ -413,8 +442,8 @@ def render_html(data, counts, archive_dates=None):
 </head>
 <body>
 <header class="header">
-  <h1>📚 基因组文献日报 | Genomic Literature Daily</h1>
-  <div class="subtitle">UKB · 自杀基因组学 · GWAS / TWAS / 单细胞 / 空间组学 · 机器学习风险预测</div>
+  <h1>📚 Genomic Literature Daily | 基因组文献日报</h1>
+  <div class="subtitle">UKB · Suicide Genomics · GWAS / TWAS / Single-cell / Spatial · ML Risk Prediction</div>
   <div class="date-badge">{date_str}</div>
 </header>
 
@@ -429,18 +458,18 @@ def render_html(data, counts, archive_dates=None):
     <div class="stat"><div class="stat-number">{counts['medrxiv']}</div>
       <div class="stat-label">medRxiv</div></div>
     <div class="stat"><div class="stat-number">{len(papers)}</div>
-      <div class="stat-label">精选 Selected</div></div>
+      <div class="stat-label">Selected 精选</div></div>
   </div>
 
-  <div class="section-title">精选文献 | Selected Papers</div>
+  <div class="section-title">Selected Papers | 精选文献</div>
   {cards}
 
-  <div class="section-title">今日综述 | Daily Synthesis</div>
+  <div class="section-title">Daily Synthesis | 今日综述</div>
   <div class="synthesis-box">{synthesis}</div>
 </div>
 
 <footer>
-  自动生成 · Auto-generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC ·
+  Auto-generated · 自动生成 {now_et} ·
   <a href="https://github.com/loveyu3317/genomic-literature-summary">GitHub</a>
 </footer>
 </body>
@@ -449,8 +478,8 @@ def render_html(data, counts, archive_dates=None):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    date_str = datetime.utcnow().strftime("%Y-%m-%d")
-    print(f"=== Daily Literature Summary: {date_str} ===")
+    date_str = datetime.now(ET).strftime("%Y-%m-%d")
+    print(f"=== Daily Literature Summary: {date_str} ET ===")
 
     pubmed_papers = fetch_pubmed_papers()
     print(f"PubMed: {len(pubmed_papers)}")
@@ -468,13 +497,11 @@ def main():
 
     data = summarize_with_claude(all_papers, date_str)
 
-    # Markdown for GitHub Issue
     markdown_output = render_markdown(data, counts)
     with open("daily_summary.md", "w", encoding="utf-8") as f:
         f.write(markdown_output)
     print("Saved daily_summary.md")
 
-    # HTML for webpage
     docs_dir = Path("docs")
     archives_dir = docs_dir / "archives"
     archives_dir.mkdir(parents=True, exist_ok=True)
