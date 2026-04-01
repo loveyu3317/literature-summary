@@ -7,6 +7,9 @@ on:
     # EST (UTC-5, Nov-Mar): runs at 8:00 AM ET — acceptable offset
     - cron: '0 13 * * *'
   workflow_dispatch:
+  push:
+    paths:
+      - '.trigger'  # Push to this file to trigger on demand
 
 jobs:
   summarize:
