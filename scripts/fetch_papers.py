@@ -144,7 +144,7 @@ def parse_pubmed_xml(xml_text):
 
             papers.append({
                 "title": title,
-                "abstract": abstract[:600] if abstract else "No abstract available.",
+                "abstract": abstract[:300] if abstract else "No abstract available.",
                 "journal": journal, "pmid": pmid, "authors": author_str,
                 "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
                 "source": "PubMed", "doi": doi,
@@ -176,7 +176,7 @@ def fetch_preprints(server="biorxiv"):
             doi = item.get("doi", "")
             papers.append({
                 "title": item.get("title", "N/A"),
-                "abstract": item.get("abstract", "")[:600],
+                "abstract": item.get("abstract", "")[:300],
                 "journal": server.capitalize(),
                 "authors": item.get("authors", "N/A"),
                 "url": f"https://doi.org/{doi}" if doi else "N/A",
@@ -262,7 +262,7 @@ Papers:
 
     message = client.messages.create(
         model="claude-opus-4-6",
-        max_tokens=4000,
+        max_tokens=8000,
         messages=[{"role": "user", "content": prompt}],
     )
 
